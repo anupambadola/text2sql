@@ -1,0 +1,30 @@
+services:
+  api:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      DATABASE_URL: duckdb:///runtime/warehouse.duckdb
+      EXAMPLES_CSV: data/text2sql_examples.csv
+      MAX_ROWS: 1000
+      MAX_SCAN_ROWS: 100000
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      GEMINI_MODEL: gemini-2.0-flash
+      RAG_TOP_K: 5
+    volumes:
+      - duckdb_data:/app/runtime
+      - chroma_data:/app/data/chroma
+
+  streamlit:
+    build: .
+    command: streamlit run streamlit_app.py --server.address 0.0.0.0 --server.port 8501
+    ports:
+      - "8501:8501"
+    environment:
+      API_URL: http://api:8000
+    depends_on:
+      - api
+
+volumes:
+  duckdb_data:
+  chroma_data:
