@@ -3,7 +3,9 @@ __pycache__/
 .venv/
 virtualenv/
 .env
+.env.example
 data/*.duckdb
 data/chroma/
 data/test-chroma/
+data/lancedb/
 .streamlit/

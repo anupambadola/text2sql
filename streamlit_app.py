@@ -57,6 +57,16 @@ if st.session_state.history:
         st.subheader("Generated SQL")
         st.code(result["sql"], language="sql")
         st.info(result["explanation"])
+        st.subheader("Was this SQL correct?")
+        feedback_left, feedback_right = st.columns(2)
+        with feedback_left:
+            if st.button("Thumbs up", key=f"feedback-up-{result['query_id']}", use_container_width=True):
+                feedback_response = requests.post(f"{API_URL}/v1/feedback", json={"query_id": result["query_id"], "correct": True}, timeout=10)
+                st.success("Thanks, this SQL was marked correct.") if feedback_response.ok else st.error(feedback_response.text)
+        with feedback_right:
+            if st.button("Thumbs down", key=f"feedback-down-{result['query_id']}", use_container_width=True):
+                feedback_response = requests.post(f"{API_URL}/v1/feedback", json={"query_id": result["query_id"], "correct": False}, timeout=10)
+                st.success("Thanks, this SQL was marked for review.") if feedback_response.ok else st.error(feedback_response.text)
         for warning in result["guardrail_warnings"]:
             st.warning(warning)
         for note in result["validation_notes"]:

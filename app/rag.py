@@ -9,10 +9,10 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 
 class HashEmbeddingFunction:
-    """Deterministic local embeddings for Chroma development and tests.
+    """Deterministic local embeddings for development and tests.
 
-    Replace with a managed Gemini embedding function in production while
-    keeping the Chroma collection and retriever contract unchanged.
+    Replace with a managed embedding function in production while keeping the
+    retriever contract unchanged.
     """
 
     def __init__(self, dimensions: int = 256):
@@ -33,21 +33,36 @@ class HashEmbeddingFunction:
         return vectors
 
 
-class ChromaRAGRetriever:
-    """Indexes approved text-to-SQL pairs in a persistent Chroma collection."""
+class LanceDBRAGRetriever:
+    """Persistent local RAG store for examples and human SQL feedback."""
 
-    def __init__(self, csv_path: str, persist_directory: str = "data/chroma", collection_name: str = "text2sql_examples", chunk_size: int = 800, chunk_overlap: int = 120):
-        import chromadb
+    def __init__(self, csv_path: str, persist_directory: str = "data/lancedb", collection_name: str = "text2sql_examples", chunk_size: int = 800, chunk_overlap: int = 120):
+        import lancedb
 
         self.csv_path = Path(csv_path)
         self.splitter = RecursiveCharacterTextSplitter(chunk_size=chunk_size, chunk_overlap=chunk_overlap)
-        self.client = chromadb.PersistentClient(path=persist_directory)
-        self.collection = self.client.get_or_create_collection(
-            name=collection_name,
-            embedding_function=HashEmbeddingFunction(),
-            metadata={"hnsw:space": "cosine"},
-        )
+        self.embedding = HashEmbeddingFunction()
+        self.client = lancedb.connect(persist_directory)
+        self.collection_name = collection_name
+        self.table = self._open_table()
         self._index_csv()
+
+    def _open_table(self):
+        if self.collection_name in self.client.table_names():
+            return self.client.open_table(self.collection_name)
+        return self.client.create_table(self.collection_name, data=[self._row("seed", "", "", "example")])
+
+    def _row(self, identifier: str, question: str, sql: str, source: str, note: str | None = None, correct: bool = False) -> dict[str, Any]:
+        text = f"Question: {question}\nSQL: {sql}"
+        return {
+            "id": identifier,
+            "vector": self.embedding([text])[0],
+            "text_query": question,
+            "sql_command": sql,
+            "source": source,
+            "note": note or "",
+            "correct": correct,
+        }
 
     def _read_examples(self) -> list[dict[str, str]]:
         if not self.csv_path.exists():
@@ -63,22 +78,27 @@ class ChromaRAGRetriever:
         examples = self._read_examples()
         if not examples:
             return
+        self.table.delete("source = 'example'")
         documents: list[Document] = []
         for item in examples:
             source = f"Question: {item['text_query']}\nSQL: {item['sql_command']}"
             documents.extend(self.splitter.create_documents([source], metadatas=[{"sql_command": item["sql_command"]}]))
-        ids = [hashlib.sha256(f"{self.csv_path}:{index}:{document.page_content}".encode()).hexdigest() for index, document in enumerate(documents)]
-        self.collection.upsert(
-            ids=ids,
-            documents=[document.page_content for document in documents],
-            metadatas=[document.metadata for document in documents],
-        )
+        rows = []
+        for index, document in enumerate(documents):
+            identifier = hashlib.sha256(f"{self.csv_path}:{index}:{document.page_content}".encode()).hexdigest()
+            rows.append(self._row(identifier, document.page_content, document.metadata["sql_command"], "example"))
+        self.table.add(rows)
 
     def retrieve(self, question: str, top_k: int = 5) -> list[dict[str, Any]]:
-        result = self.collection.query(query_texts=[question], n_results=top_k)
-        documents = result.get("documents", [[]])[0]
-        metadatas = result.get("metadatas", [[]])[0]
+        matches = self.table.search(self.embedding([question])[0]).limit(top_k).to_list()
         return [
-            {"text_query": document, "sql_command": metadata["sql_command"]}
-            for document, metadata in zip(documents, metadatas)
+            {"text_query": match.get("text_query", ""), "sql_command": match.get("sql_command", ""), "source": match.get("source", "example"), "feedback_note": match.get("note", ""), "feedback_correct": match.get("correct")}
+            for match in matches
+            if match.get("id") != "seed" and match.get("sql_command")
         ]
+
+    def record_feedback(self, query_id: str, question: str, sql: str, correct: bool, note: str | None = None) -> None:
+        self.table.add([self._row(query_id, question, sql, "feedback", note, correct)])
+
+
+ChromaRAGRetriever = LanceDBRAGRetriever

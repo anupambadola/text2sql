@@ -1,6 +1,6 @@
 # QueryGuard: Text-to-SQL with Guardrails
 
-A portfolio-ready Text-to-SQL interface built with FastAPI, Streamlit, DuckDB, ChromaDB RAG, Gemini, SQL parsing guardrails, and confidence signals. It retrieves approved question-to-SQL examples from CSV, grounds Gemini generation with those examples and the live schema, blocks destructive operations, enforces a row limit, and exposes the reasoning signals behind each answer.
+A portfolio-ready Text-to-SQL interface built with FastAPI, Streamlit, PostgreSQL, LanceDB RAG, Gemini, SQL parsing guardrails, and confidence signals. It retrieves approved question-to-SQL examples and prior SQL feedback, grounds Gemini generation with them and the live schema, blocks destructive operations, enforces a row limit, and exposes the reasoning signals behind each answer.
 
 ## Run locally
 
@@ -50,14 +50,14 @@ The API runs on port 8000 and Streamlit on port 8501.
 
 ## Architecture
 
-- `app/data_source.py`: enterprise CSV catalog that loads user CSV files into DuckDB tables; the question/SQL CSV is excluded from analytical tables.
+- `app/data_source.py`: enterprise CSV catalog that loads user CSV files into PostgreSQL tables; the question/SQL CSV is excluded from analytical tables.
 - `app/schema.py`: database schema introspection over the loaded CSV tables.
-- `app/rag.py`: LangChain chunking plus ChromaDB persistent vector index over CSV question-to-SQL examples.
+- `app/rag.py`: LangChain chunking plus a persistent LanceDB vector index over CSV question-to-SQL examples and thumbs-up/down feedback.
 - `app/generator.py`: Gemini structured-output generation grounded by retrieved examples, with an offline fallback.
 - `app/guardrails.py`: SELECT-only enforcement, destructive keyword blocking, single-statement validation, subquery depth check, and automatic `LIMIT`.
-- `app/service.py`: execution, result packaging, confidence scoring, and in-memory audit history.
+- `app/service.py`: PostgreSQL execution, result packaging, confidence scoring, feedback persistence, and in-memory query history.
 - `streamlit_app.py`: query interface with SQL, results, warnings, and confidence breakdown.
 
 Place the source-table CSV files in `data/`. Each filename becomes a table name, for example `head.csv` becomes `head`. The supplied `spider_text_sql.csv` is a RAG training/example set and is excluded from SQL tables because it contains questions and SQL pairs, not source rows. Add the corresponding `head.csv`, `department.csv`, and `management.csv` files to execute those examples.
 
-Without `GEMINI_API_KEY`, the app still starts using a local fallback generator; Chroma retrieval remains active and is reported in the API response.
+Without `GEMINI_API_KEY`, the app still starts using a local fallback generator; LanceDB retrieval remains active and is reported in the API response. Start Docker Compose to run PostgreSQL locally, or set `DATABASE_URL` to an existing PostgreSQL database.

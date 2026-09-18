@@ -4,16 +4,32 @@ services:
     ports:
       - "8000:8000"
     environment:
-      DATABASE_URL: duckdb:///runtime/warehouse.duckdb
-      EXAMPLES_CSV: data/text2sql_examples.csv
+      DATABASE_URL: postgresql://text2sql:text2sql@postgres:5432/text2sql
+      EXAMPLES_CSV: data/spider_text_sql.csv
       MAX_ROWS: 1000
       MAX_SCAN_ROWS: 100000
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}
       GEMINI_MODEL: gemini-2.0-flash
       RAG_TOP_K: 5
     volumes:
-      - duckdb_data:/app/runtime
-      - chroma_data:/app/data/chroma
+      - lancedb_data:/app/data/lancedb
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: text2sql
+      POSTGRES_USER: text2sql
+      POSTGRES_PASSWORD: text2sql
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U text2sql -d text2sql"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
 
   streamlit:
     build: .
@@ -26,5 +42,5 @@ services:
       - api
 
 volumes:
-  duckdb_data:
-  chroma_data:
+  postgres_data:
+  lancedb_data:

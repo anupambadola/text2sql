@@ -4,7 +4,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    database_url: str = "duckdb:///data/warehouse.duckdb"
+    database_url: str = "postgresql://text2sql:text2sql@localhost:5432/text2sql"
     data_dir: str = "data"
     examples_csv: str = "data/spider_text_sql.csv"
     max_rows: int = 1000
@@ -14,6 +14,7 @@ class Settings(BaseSettings):
     rag_top_k: int = 5
     rag_chunk_size: int = 800
     rag_chunk_overlap: int = 120
+    rag_database_path: str = "data/lancedb"
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 

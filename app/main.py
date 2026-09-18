@@ -30,8 +30,4 @@ def history():
 
 @app.post("/v1/feedback")
 def feedback(request: FeedbackRequest):
-    for item in service.history:
-        if item["query_id"] == request.query_id:
-            item["feedback"] = {"correct": request.correct, "note": request.note}
-            return {"status": "recorded"}
-    return {"status": "not_found"}
+    return {"status": "recorded" if service.record_feedback(request.query_id, request.correct, request.note) else "not_found"}

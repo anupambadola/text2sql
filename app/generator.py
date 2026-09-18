@@ -3,7 +3,7 @@ import re
 from dataclasses import dataclass
 from typing import Any
 
-from app.rag import ChromaRAGRetriever
+from app.rag import LanceDBRAGRetriever
 
 
 @dataclass
@@ -18,12 +18,12 @@ class GeneratedQuery:
 
 
 class QueryGenerator:
-    """Gemini structured generation grounded by Chroma-retrieved examples."""
+    """Gemini structured generation grounded by LanceDB-retrieved examples."""
 
-    def __init__(self, api_key: str | None, model: str, examples_csv: str, top_k: int = 5, chunk_size: int = 800, chunk_overlap: int = 120):
+    def __init__(self, api_key: str | None, model: str, examples_csv: str, top_k: int = 5, chunk_size: int = 800, chunk_overlap: int = 120, rag_database_path: str = "data/lancedb"):
         self.model = model
         self.top_k = top_k
-        self.retriever = ChromaRAGRetriever(examples_csv, chunk_size=chunk_size, chunk_overlap=chunk_overlap)
+        self.retriever = LanceDBRAGRetriever(examples_csv, persist_directory=rag_database_path, chunk_size=chunk_size, chunk_overlap=chunk_overlap)
         self.client: Any = None
         if api_key:
             from google import genai
@@ -36,11 +36,16 @@ class QueryGenerator:
             return self._generate_with_gemini(question, schema, examples)
         return self._fallback(question, examples)
 
+    def record_feedback(self, query_id: str, question: str, sql: str, correct: bool, note: str | None = None) -> None:
+        self.retriever.record_feedback(query_id, question, sql, correct, note)
+
     def _generate_with_gemini(self, question: str, schema: list[dict[str, Any]], examples: list[dict[str, Any]]):
         from google.genai import types
 
         few_shots = "\n".join(
-            f"Question: {item['text_query']}\nSQL: {item['sql_command']}" for item in examples
+            f"Question: {item['text_query']}\nSQL: {item['sql_command']}"
+            + (f"\nFeedback: {'correct' if item.get('feedback_correct') else 'incorrect'} {item.get('feedback_note', '')}" if item.get("source") == "feedback" else "")
+            for item in examples
         )
         prompt = f"""You are an enterprise Text-to-SQL compiler. Generate only read-only SQL.
 Database schema: {json.dumps(schema, default=str)}
