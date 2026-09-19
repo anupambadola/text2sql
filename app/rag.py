@@ -98,6 +98,7 @@ class LanceDBRAGRetriever:
         ]
 
     def record_feedback(self, query_id: str, question: str, sql: str, correct: bool, note: str | None = None) -> None:
+        print(f"LanceDB write: id={query_id}, source=feedback, correct={correct}")
         self.table.add([self._row(query_id, question, sql, "feedback", note, correct)])
 
 

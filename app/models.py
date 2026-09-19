@@ -11,6 +11,9 @@ class FeedbackRequest(BaseModel):
     query_id: str
     correct: bool
     note: str | None = None
+    corrected_sql: str | None = None
+    question: str | None = None
+    original_sql: str | None = None
 
 
 class QueryResponse(BaseModel):

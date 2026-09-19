@@ -2090,7 +2090,7 @@ List the distinct positions of pilots older than 30.,SELECT DISTINCT POSITION FR
 What is the joined year of the pilot of the highest rank?,SELECT Join_Year FROM pilot ORDER BY Rank ASC LIMIT 1
 What are the different nationalities of pilots? Show each nationality and the number of pilots of each nationality.,"SELECT Nationality ,  COUNT(*) FROM pilot GROUP BY Nationality"
 Show the most common nationality of pilots.,SELECT Nationality FROM pilot GROUP BY Nationality ORDER BY COUNT(*) DESC LIMIT 1
-Show the pilot positions that have both pilots joining after year 2005 and pilots joining before 2000.,SELECT POSITION FROM pilot WHERE Join_Year	 <  2000 INTERSECT SELECT POSITION FROM pilot WHERE Join_Year	 >  2005
+Show the pilot positions that have both pilots joining after year 2005 and pilots joining before 2000.,"SELECT POSITION FROM pilot WHERE Join_Year	 <  2000 INTERSECT SELECT POSITION FROM pilot WHERE Join_Year	 >  2005"
 Show the names of pilots and models of aircrafts they have flied with.,"SELECT T3.Pilot_name ,  T2.Model FROM pilot_record AS T1 JOIN aircraft AS T2 ON T1.Aircraft_ID  =  T2.Aircraft_ID JOIN pilot AS T3 ON T1.Pilot_ID  =  T3.Pilot_ID"
 Show the names of pilots and fleet series of the aircrafts they have flied with in ascending order of the rank of the pilot.,"SELECT T3.Pilot_name ,  T2.Fleet_Series FROM pilot_record AS T1 JOIN aircraft AS T2 ON T1.Aircraft_ID  =  T2.Aircraft_ID JOIN pilot AS T3 ON T1.Pilot_ID  =  T3.Pilot_ID ORDER BY T3.Rank"
 Show the fleet series of the aircrafts flied by pilots younger than 34,SELECT T2.Fleet_Series FROM pilot_record AS T1 JOIN aircraft AS T2 ON T1.Aircraft_ID  =  T2.Aircraft_ID JOIN pilot AS T3 ON T1.Pilot_ID  =  T3.Pilot_ID WHERE T3.Age  <  34

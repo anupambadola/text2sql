@@ -15,6 +15,7 @@ def health():
 
 @app.post("/v1/query")
 def query(request: QueryRequest):
+    print(f"API query received: {request.question}")
     return service.run(request.question)
 
 
@@ -30,4 +31,5 @@ def history():
 
 @app.post("/v1/feedback")
 def feedback(request: FeedbackRequest):
-    return {"status": "recorded" if service.record_feedback(request.query_id, request.correct, request.note) else "not_found"}
+    print(f"API feedback received: query_id={request.query_id}, corrected_sql_present={bool(request.corrected_sql and request.corrected_sql.strip())}")
+    return service.record_feedback(request.query_id, request.correct, request.note, request.corrected_sql, request.question, request.original_sql)

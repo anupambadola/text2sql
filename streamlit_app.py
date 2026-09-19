@@ -4,7 +4,7 @@ import pandas as pd
 import requests
 import streamlit as st
 
-API_URL = os.getenv("API_URL", "http://localhost:8000")
+API_URL = os.getenv("API_URL", "http://localhost:8001")
 
 st.set_page_config(page_title="QueryGuard", page_icon="Q", layout="wide")
 st.title("QueryGuard")
@@ -25,6 +25,7 @@ with st.sidebar:
     run = st.button("Run query", type="primary", use_container_width=True)
     st.divider()
     st.subheader("Guardrails")
+    st.caption(f"API: {API_URL}")
     st.write("SELECT-only execution")
     st.write("Automatic row limit")
     st.write("Confidence and validation signals")
@@ -65,21 +66,47 @@ if st.session_state.history:
         st.code(result["sql"], language="sql")
         st.info(result["explanation"])
         st.subheader("Was this SQL correct?")
+        corrected_sql = st.text_area(
+            "Correct SQL (optional)",
+            value=result["sql"],
+            key=f"corrected-sql-{result['query_id']}",
+            height=140,
+        )
+        if st.button("Save corrected SQL to RAG", key=f"save-correction-{result['query_id']}", use_container_width=True):
+            try:
+                feedback_response = requests.post(
+                    f"{API_URL}/v1/feedback",
+                    json={"query_id": result["query_id"], "correct": False, "corrected_sql": corrected_sql, "question": result["question"], "original_sql": result["sql"]},
+                    timeout=30,
+                )
+                print(f"Feedback response: {feedback_response.status_code} {feedback_response.text}")
+                if feedback_response.ok:
+                    feedback_result = feedback_response.json()
+                    if feedback_result.get("correction_saved"):
+                        st.success(feedback_result.get("message", "Corrected SQL saved to RAG."))
+                    else:
+                        st.error(feedback_result.get("message", "Corrected SQL was not saved."))
+                else:
+                    st.error(f"API error ({feedback_response.status_code}): {feedback_response.text}")
+            except requests.RequestException as exc:
+                print(f"Feedback request failed: {exc}")
+                st.error(f"Could not submit correction to {API_URL}: {exc}")
         feedback_left, feedback_right = st.columns(2)
         with feedback_left:
             if st.button("Thumbs up", key=f"feedback-up-{result['query_id']}", use_container_width=True):
-                feedback_response = requests.post(f"{API_URL}/v1/feedback", json={"query_id": result["query_id"], "correct": True}, timeout=10)
+                feedback_response = requests.post(f"{API_URL}/v1/feedback", json={"query_id": result["query_id"], "correct": True, "question": result["question"], "original_sql": result["sql"]}, timeout=10)
                 if feedback_response.ok:
                     st.success("Thanks, this SQL was marked correct.")
                 else:
                     st.error(feedback_response.text)
         with feedback_right:
             if st.button("Thumbs down", key=f"feedback-down-{result['query_id']}", use_container_width=True):
-                feedback_response = requests.post(f"{API_URL}/v1/feedback", json={"query_id": result["query_id"], "correct": False}, timeout=10)
+                feedback_response = requests.post(f"{API_URL}/v1/feedback", json={"query_id": result["query_id"], "correct": False, "question": result["question"], "original_sql": result["sql"]}, timeout=10)
                 if feedback_response.ok:
-                    st.success("Thanks, this SQL was marked for review.")
+                    feedback_result = feedback_response.json()
+                    st.warning(feedback_result.get("message", "Original SQL was marked incorrect. Edit it and use Save corrected SQL to RAG if needed."))
                 else:
-                    st.error(feedback_response.text)
+                    st.error(f"API error ({feedback_response.status_code}): {feedback_response.text}")
         for warning in result["guardrail_warnings"]:
             st.warning(warning)
         for note in result["validation_notes"]:

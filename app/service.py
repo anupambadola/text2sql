@@ -47,10 +47,26 @@ class QueryService:
     def schema(self):
         return extract_schema(self.warehouse)
 
-    def record_feedback(self, query_id: str, correct: bool, note: str | None = None) -> bool:
+    def record_feedback(self, query_id: str, correct: bool, note: str | None = None, corrected_sql: str | None = None, question: str | None = None, original_sql: str | None = None) -> dict[str, Any]:
+        print(f"Feedback save started: query_id={query_id}, corrected_sql_present={bool(corrected_sql and corrected_sql.strip())}")
         for item in self.history:
             if item["query_id"] == query_id:
-                self.generator.record_feedback(query_id, item["question"], item["sql"], correct, note)
+                question = item["question"]
+                original_sql = item["sql"]
                 item["feedback"] = {"correct": correct, "note": note}
-                return True
-        return False
+                break
+        if not question or not original_sql:
+            print("Feedback save failed: missing question/original SQL context")
+            return {"status": "not_found", "original_feedback_saved": False, "correction_saved": False, "message": "Query context was not provided and is no longer in API history."}
+        print(f"Saving original feedback for question: {question}")
+        self.generator.record_feedback(f"{query_id}-original", question, original_sql, correct, note)
+        if corrected_sql and corrected_sql.strip():
+            correction_check = check_query(corrected_sql.strip(), self.settings.max_rows)
+            if not correction_check.allowed:
+                print(f"Corrected SQL rejected: {correction_check.warnings}")
+                return {"status": "rejected", "original_feedback_saved": True, "correction_saved": False, "message": correction_check.warnings[0]}
+            print(f"Saving corrected SQL to vector database: {correction_check.sql}")
+            self.generator.record_feedback(f"{query_id}-correction", question, correction_check.sql, True, "User-provided correction")
+            print("Corrected SQL saved successfully")
+            return {"status": "recorded", "original_feedback_saved": True, "correction_saved": True, "message": "Corrected SQL was saved to the vector database."}
+        return {"status": "recorded", "original_feedback_saved": True, "correction_saved": False, "message": "Feedback was saved."}
