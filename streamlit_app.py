@@ -31,12 +31,19 @@ with st.sidebar:
 
 if run:
     with st.spinner("Generating, checking, and executing..."):
-        response = requests.post(f"{API_URL}/v1/query", json={"question": question}, timeout=30)
-    if response.ok:
-        result = response.json()
-        st.session_state.history.insert(0, result)
-    else:
-        st.error(response.text)
+        try:
+            response = requests.post(f"{API_URL}/v1/query", json={"question": question}, timeout=180)
+        except requests.RequestException as exc:
+            if isinstance(exc, requests.Timeout):
+                st.error(f"The query timed out after 180 seconds. The API or model is still processing the request.")
+            else:
+                st.error(f"The API is unavailable at {API_URL}. Start Uvicorn with app.main:app. Details: {exc}")
+        else:
+            if response.ok:
+                result = response.json()
+                st.session_state.history.insert(0, result)
+            else:
+                st.error(f"API error ({response.status_code}): {response.text}")
 
 if st.session_state.history:
     result = st.session_state.history[0]
@@ -50,7 +57,7 @@ if st.session_state.history:
             st.caption(f"{result['row_count']} rows | {result['execution_ms']} ms")
         with right:
             st.metric("Confidence", f"{result['confidence']:.0%}")
-            st.caption(f"Provider: {result.get('provider', 'fallback')} | Retrieved examples: {result.get('retrieved_examples', 0)}")
+            st.caption(f"SQL source: {result.get('provider', 'unknown')} | RAG examples used as context: {result.get('retrieved_examples', 0)}")
             st.subheader("Signal breakdown")
             for name, value in result["confidence_breakdown"].items():
                 st.progress(value, text=f"{name.replace('_', ' ').title()}: {value:.0%}")
@@ -62,11 +69,17 @@ if st.session_state.history:
         with feedback_left:
             if st.button("Thumbs up", key=f"feedback-up-{result['query_id']}", use_container_width=True):
                 feedback_response = requests.post(f"{API_URL}/v1/feedback", json={"query_id": result["query_id"], "correct": True}, timeout=10)
-                st.success("Thanks, this SQL was marked correct.") if feedback_response.ok else st.error(feedback_response.text)
+                if feedback_response.ok:
+                    st.success("Thanks, this SQL was marked correct.")
+                else:
+                    st.error(feedback_response.text)
         with feedback_right:
             if st.button("Thumbs down", key=f"feedback-down-{result['query_id']}", use_container_width=True):
                 feedback_response = requests.post(f"{API_URL}/v1/feedback", json={"query_id": result["query_id"], "correct": False}, timeout=10)
-                st.success("Thanks, this SQL was marked for review.") if feedback_response.ok else st.error(feedback_response.text)
+                if feedback_response.ok:
+                    st.success("Thanks, this SQL was marked for review.")
+                else:
+                    st.error(feedback_response.text)
         for warning in result["guardrail_warnings"]:
             st.warning(warning)
         for note in result["validation_notes"]:

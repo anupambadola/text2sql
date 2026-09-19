@@ -3,6 +3,8 @@ import re
 from dataclasses import dataclass
 from typing import Any
 
+import requests
+
 from app.rag import LanceDBRAGRetriever
 
 
@@ -14,63 +16,102 @@ class GeneratedQuery:
     confidence: float
     notes: list[str]
     retrieved_examples: int = 0
-    provider: str = "fallback"
+    provider: str = "LLM"
 
 
 class QueryGenerator:
-    """Gemini structured generation grounded by LanceDB-retrieved examples."""
+    """OpenRouter structured generation grounded by LanceDB-retrieved examples."""
 
-    def __init__(self, api_key: str | None, model: str, examples_csv: str, top_k: int = 5, chunk_size: int = 800, chunk_overlap: int = 120, rag_database_path: str = "data/lancedb"):
+    def __init__(self, api_key: str | None, model: str, base_url: str, examples_csv: str, top_k: int = 5, chunk_size: int = 800, chunk_overlap: int = 120, rag_database_path: str = "data/lancedb"):
         self.model = model
+        self.api_key = api_key
+        self.base_url = base_url.rstrip("/")
         self.top_k = top_k
         self.retriever = LanceDBRAGRetriever(examples_csv, persist_directory=rag_database_path, chunk_size=chunk_size, chunk_overlap=chunk_overlap)
-        self.client: Any = None
-        if api_key:
-            from google import genai
-
-            self.client = genai.Client(api_key=api_key)
 
     def generate(self, question: str, schema: list[dict[str, Any]]) -> GeneratedQuery:
         examples = self.retriever.retrieve(question, self.top_k)
-        if self.client:
-            return self._generate_with_gemini(question, schema, examples)
-        return self._fallback(question, examples)
+        if not self.api_key:
+            print("SQL source: unavailable; RAG retrieved context but no LLM API client is configured.")
+            raise RuntimeError("OpenRouter is not configured; SQL generation requires an API key.")
+        print(f"SQL source: LLM; RAG context examples retrieved: {len(examples)}")
+        return self._generate_with_openrouter(question, schema, examples)
 
     def record_feedback(self, query_id: str, question: str, sql: str, correct: bool, note: str | None = None) -> None:
         self.retriever.record_feedback(query_id, question, sql, correct, note)
 
-    def _generate_with_gemini(self, question: str, schema: list[dict[str, Any]], examples: list[dict[str, Any]]):
-        from google.genai import types
-
+    def _generate_with_openrouter(self, question: str, schema: list[dict[str, Any]], examples: list[dict[str, Any]]):
+        schema_context = json.dumps(schema, default=str)
         few_shots = "\n".join(
             f"Question: {item['text_query']}\nSQL: {item['sql_command']}"
             + (f"\nFeedback: {'correct' if item.get('feedback_correct') else 'incorrect'} {item.get('feedback_note', '')}" if item.get("source") == "feedback" else "")
             for item in examples
         )
-        prompt = f"""You are an enterprise Text-to-SQL compiler. Generate only read-only SQL.
-Database schema: {json.dumps(schema, default=str)}
-Retrieved approved examples:
-{few_shots}
-User question: {question}
+        prompt = f"""You are an enterprise Text-to-SQL compiler. Generate only read-only PostgreSQL SQL.
+        The database schema below is authoritative. You MUST use only the listed table and column names.
+        Never copy a table or column from a retrieved example if it is absent from this schema.
+        Database schema: {schema_context}
+        Retrieved examples are reference patterns only, not additional schema:
+        {few_shots}
+        User question: {question}
 
-Return JSON with exactly these keys: sql, explanation, tables, confidence, notes.
-confidence must be a number between 0 and 1. Use only tables and columns in the schema.
-"""
-        response = self.client.models.generate_content(
-            model=self.model,
-            contents=prompt,
-            config=types.GenerateContentConfig(response_mime_type="application/json"),
-        )
-        payload = json.loads(response.text)
+        Return JSON with exactly these keys: sql, explanation, tables, confidence, notes.
+        confidence must be a number between 0 and 1. The tables field must list only tables used by sql.
+        """
+        payload = self._request_llm(prompt)
+        invalid_tables = self._invalid_tables(payload["sql"], schema)
+        if invalid_tables:
+            correction_prompt = f"""Your previous SQL used tables not present in the database: {', '.join(invalid_tables)}.
+            Generate a corrected read-only PostgreSQL query for this question.
+            Question: {question}
+            Authoritative schema: {schema_context}
+            Return JSON with exactly: sql, explanation, tables, confidence, notes.
+            Do not use any table or column not listed in the authoritative schema.
+            Previous SQL: {payload['sql']}
+            """
+            payload = self._request_llm(correction_prompt)
+            invalid_tables = self._invalid_tables(payload["sql"], schema)
+        if invalid_tables:
+            print(f"Invalid tables returned by LLM: {', '.join(invalid_tables)}")
+            raise ValueError(f"LLM returned invalid tables: {', '.join(invalid_tables)}")
+        notes = payload.get("notes") or []
+        tables = payload.get("tables") or []
+        if not isinstance(notes, list):
+            notes = [str(notes)]
+        if not isinstance(tables, list):
+            tables = [str(tables)]
         return GeneratedQuery(
-            sql=payload["sql"], explanation=payload["explanation"], tables=payload.get("tables", []),
-            confidence=float(payload.get("confidence", 0.5)), notes=payload.get("notes", []),
-            retrieved_examples=len(examples), provider="gemini",
+            sql=payload["sql"], explanation=payload.get("explanation") or "Generated by OpenRouter.", tables=tables,
+            confidence=float(payload.get("confidence") or 0.5), notes=notes,
+            retrieved_examples=len(examples), provider="LLM",
         )
 
-    def _fallback(self, question: str, examples: list[dict[str, Any]]) -> GeneratedQuery:
-        if examples:
-            sql = examples[0]["sql_command"]
-            tables = sorted(set(re.findall(r"\b(?:from|join)\s+([a-zA-Z_][\w]*)", sql, re.IGNORECASE)))
-            return GeneratedQuery(sql, "Used the highest-ranked approved CSV example because Gemini is not configured.", tables, 0.55, ["No Gemini key was configured; RAG fallback generation was used."], len(examples))
-        return GeneratedQuery("SELECT 1", "No approved examples were found.", [], 0.05, ["Add a text_query,sql_command CSV and configure Gemini."], 0)
+    def _request_llm(self, prompt: str) -> dict[str, Any]:
+        response = requests.post(
+            self._completion_url(),
+            headers={"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"},
+            json={
+                "model": self.model,
+                "messages": [{"role": "user", "content": prompt}],
+                "temperature": 0,
+                "response_format": {"type": "json_object"},
+            },
+            timeout=180,
+        )
+        response.raise_for_status()
+        content = response.json()["choices"][0]["message"]["content"]
+        if content.startswith("```"):
+            content = re.sub(r"^```(?:json)?\s*|\s*```$", "", content.strip(), flags=re.IGNORECASE)
+        return json.loads(content)
+
+    def _completion_url(self) -> str:
+        if self.base_url.endswith("/chat/completions"):
+            return self.base_url
+        return f"{self.base_url}/chat/completions"
+
+    @staticmethod
+    def _invalid_tables(sql: str, schema: list[dict[str, Any]]) -> list[str]:
+        allowed = {str(item["table"]).lower() for item in schema}
+        referenced = {name.lower() for name in re.findall(r"\b(?:from|join)\s+([a-zA-Z_][\w]*)", sql, re.IGNORECASE)}
+        return sorted(referenced - allowed)
+

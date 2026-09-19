@@ -28,4 +28,4 @@ class QueryResponse(BaseModel):
     tables: list[str] = []
     blocked: bool = False
     retrieved_examples: int = 0
-    provider: str = "fallback"
+    provider: str = "LLM"

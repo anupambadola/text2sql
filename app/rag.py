@@ -94,7 +94,7 @@ class LanceDBRAGRetriever:
         return [
             {"text_query": match.get("text_query", ""), "sql_command": match.get("sql_command", ""), "source": match.get("source", "example"), "feedback_note": match.get("note", ""), "feedback_correct": match.get("correct")}
             for match in matches
-            if match.get("id") != "seed" and match.get("sql_command")
+            if match.get("id") != "seed" and match.get("sql_command") and not (match.get("source") == "feedback" and match.get("correct") is False)
         ]
 
     def record_feedback(self, query_id: str, question: str, sql: str, correct: bool, note: str | None = None) -> None:

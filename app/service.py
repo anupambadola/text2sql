@@ -14,7 +14,7 @@ class QueryService:
     def __init__(self, settings: Settings):
         self.settings = settings
         self.warehouse = CsvWarehouse(settings.database_url, settings.data_dir, settings.examples_csv)
-        self.generator = QueryGenerator(settings.gemini_api_key, settings.gemini_model, settings.examples_csv, settings.rag_top_k, settings.rag_chunk_size, settings.rag_chunk_overlap, settings.rag_database_path)
+        self.generator = QueryGenerator(settings.openrouter_api_key, settings.openrouter_model, settings.openrouter_base_url, settings.examples_csv, settings.rag_top_k, settings.rag_chunk_size, settings.rag_chunk_overlap, settings.rag_database_path)
         self.history: list[dict[str, Any]] = []
 
     def run(self, question: str) -> QueryResponse:
@@ -32,7 +32,7 @@ class QueryService:
                 cursor.execute(guardrail.sql)
                 rows = [dict(zip([column.name for column in cursor.description], row)) for row in cursor.fetchall()]
         except Exception as exc:
-            response = QueryResponse(query_id=query_id, question=question, sql=guardrail.sql, explanation=generated.explanation, rows=[], row_count=0, execution_ms=(time.perf_counter() - started) * 1000, confidence=0.0, confidence_breakdown={"sql_validity": 0.0, "alignment": generated.confidence, "result_sanity": 0.0, "schema_coverage": 0.0}, guardrail_warnings=guardrail.warnings, validation_notes=[f"Execution failed: {exc}"], tables=generated.tables, retrieved_examples=generated.retrieved_examples, provider=generated.provider)
+                response = QueryResponse(query_id=query_id, question=question, sql=guardrail.sql, explanation=generated.explanation, rows=[], row_count=0, execution_ms=(time.perf_counter() - started) * 1000, confidence=0.0, confidence_breakdown={"sql_validity": 0.0, "alignment": generated.confidence, "result_sanity": 0.0, "schema_coverage": 0.0}, guardrail_warnings=guardrail.warnings, validation_notes=generated.notes + [f"Execution failed: {exc}"], tables=generated.tables, retrieved_examples=generated.retrieved_examples, provider=generated.provider)
         else:
             breakdown = {"sql_validity": 1.0, "alignment": generated.confidence, "result_sanity": 1.0, "schema_coverage": min(1.0, len(generated.tables) / 2)}
             confidence = round(sum(breakdown.values()) / len(breakdown), 2)
