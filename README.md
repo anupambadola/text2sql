@@ -101,12 +101,6 @@ The Compose file also persists LanceDB data and Postgres data in Docker volumes.
 
 ## How the app works
 
-### Data loading
-
-`CsvWarehouse` scans the `data/` directory at startup and imports each CSV into PostgreSQL. It drops and recreates each table if it exists, so the in-memory database stays synchronized with the CSV files.
-
-The example CSV (`data/spider_text_sql.csv`) is intentionally excluded from table creation because it contains prompt/SQL pairs rather than source data.
-
 ### Schema grounding
 
 `extract_schema` inspects the database tables and exposes a minimal schema description to the generator so the model works from the actual live schema rather than guessing table names.
